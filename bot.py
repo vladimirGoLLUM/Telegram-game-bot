@@ -2,6 +2,7 @@ import logging
 import asyncio
 import sys
 import json
+import os
 from flask import Flask, request, jsonify, send_from_directory
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from telegram.ext import (
@@ -11,7 +12,7 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
-import os
+
 TOKEN = os.getenv("BOT_TOKEN")
 from database import init_db, save_player, get_player
 
@@ -45,7 +46,13 @@ def static_files(filename):
 # Главная страница
 @flask_app.route('/')
 def index():
-    return send_from_directory(WEBAPP_DIR, 'index.html')
+    """Главная страница — игра"""
+    return send_from_directory('webapp', 'index.html')
+
+@app.route('/<path:filename>')
+def serve_static(filename):
+    """Обслуживание статики: JS, CSS, изображения"""
+    return send_from_directory('webapp', filename)
 
 # Запуск Flask в отдельном потоке
 def run_flask():

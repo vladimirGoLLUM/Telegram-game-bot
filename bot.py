@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 WEBAPP_DIR = os.path.join(os.path.dirname(__file__), 'webapp')
 
 # URL твоего приложения (ngrok или другой)
-WEB_APP_URL = "web-production-d46f0.up.railway.app"
+WEB_APP_URL = "https://web-production-d46f0.up.railway.app"
 
 # === Flask приложение ===
 flask_app = Flask(__name__)

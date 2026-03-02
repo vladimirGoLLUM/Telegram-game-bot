@@ -3,6 +3,17 @@ git commit -m
 git push
 
 
+📈 Хочешь, чтобы бот работал стабильно?
+Добавь UptimeRobot (бесплатно), чтобы "будить" сайт каждые 5 минут:
+
+Перейди: https://uptimerobot.com
+Создай аккаунт
+Нажми "Add New Monitor"
+Тип: HTTP(s)
+URL: https://telegram-game-bot.up.railway.app
+Интервал: 5 minutes
+Сохрани
+✅ Теперь Railway не будет "засыпать" через 5–10 минут без запросов.
 
 
 git config --global user.name "vladimirGoLLUM"

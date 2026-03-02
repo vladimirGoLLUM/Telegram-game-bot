@@ -1,5 +1,5 @@
 git config --global user.name "vladimirGoLLUM"
-git config --global user.email "gollum@21051992.ru "
+git config --global user.email "gollum@21051992.ru"
 
 echo "# Telegram-game-bot" >> README.md
 git init

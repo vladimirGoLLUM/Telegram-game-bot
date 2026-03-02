@@ -1,0 +1,1483 @@
+bot.py
+import logging
+import asyncio
+import sys
+import json
+from flask import Flask, request, jsonify, send_from_directory
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
+import os
+
+# === Импорты (предполагается, что у тебя есть config.py и database.py) ===
+from config import TOKEN
+from database import init_db, save_player, get_player
+
+# Настройка логирования
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Путь к папке с веб-файлами
+WEBAPP_DIR = os.path.join(os.path.dirname(__file__), 'webapp')
+
+# URL твоего приложения (ngrok или другой)
+WEB_APP_URL = "https://fay-unrepelled-perceptibly.ngrok-free.dev"
+
+# === Flask приложение ===
+flask_app = Flask(__name__)
+
+# API: Получение данных игрока
+@flask_app.route('/api/player')
+def api_get_player():
+    user_id = request.args.get('user_id')
+    if not user_id or not user_id.isdigit():
+        return jsonify({"error": "Invalid user_id"}), 400
+    player = get_player(int(user_id))
+    return jsonify(player) if player else jsonify(None)
+
+# Статические файлы: /index.html, /style.css и т.д.
+@flask_app.route('/<path:filename>')
+def static_files(filename):
+    return send_from_directory(WEBAPP_DIR, filename)
+
+# Главная страница
+@flask_app.route('/')
+def index():
+    return send_from_directory(WEBAPP_DIR, 'index.html')
+
+# Запуск Flask в отдельном потоке
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=8000, threaded=True)
+
+# === Генерация главного меню с user_id в URL ===
+def get_main_menu(user_id):
+    url = f"{WEB_APP_URL}?user_id={user_id}"
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("🎮 Играть", web_app=WebAppInfo(url=url))],
+    ], resize_keyboard=True)
+
+@flask_app.route('/api/create', methods=['POST'])
+def api_create_character():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    name = data.get('name')
+    race = data.get('race')
+    cls = data.get('class')
+    attributes = data.get('attributes')
+
+    if not all([user_id, name, race, cls, attributes]):
+        return jsonify({"error": "Missing data"}), 400
+
+    # Создаём игрока с пустым инвентарём
+    save_player(
+        user_id=int(user_id),
+        name=name,
+        race=race,
+        cls=cls,
+        attributes=attributes,
+        level=1,
+        exp=0,
+        gold=100,
+        inventory={}
+    )
+    return jsonify({"success": True, "name": name})
+
+# === Обработчики Telegram ===
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    first_name = update.effective_user.first_name
+
+    # Всегда показываем кнопку "Играть", независимо от наличия персонажа
+    url = f"{WEB_APP_URL}?user_id={user_id}"
+    keyboard = [[KeyboardButton("🎮 Играть", web_app=WebAppInfo(url=url))]]
+
+    await update.message.reply_text(
+        f"🌟 Добро пожаловать, {first_name}!\n"
+        "Нажми «Играть», чтобы начать приключение.\n"
+        "Создание персонажа — прямо в игре!",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+
+async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        raw_data = update.effective_message.web_app_data.data
+        logger.info(f"Получены RAW данные: {raw_data}")
+
+        data = json.loads(raw_data)
+        action = data.get("action")
+        user_id = update.effective_user.id
+
+        if action == "create_character":
+            name = data["name"]
+            race = data["race"]
+            cls = data["class"]
+            attrs = data["attributes"]
+            save_player(user_id, name, race, cls, attrs)
+
+        elif action == "start_battle":
+            monster = data["monster"]
+            level = data["level"]
+            player = get_player(user_id)
+            if player:
+                new_exp = player["exp"] + 50
+                new_gold = player["gold"] + 30
+                # Обнови exp и gold при необходимости
+                save_player(
+                    user_id=user_id,
+                    name=player["name"],
+                    race=player["race"],
+                    cls=player["class"],
+                    attributes=player["attributes"],
+                    level=player["level"],
+                    exp=new_exp,
+                    gold=new_gold,
+                    inventory=player["inventory"]
+                )
+
+        elif action == "upgrade_stat":
+            stat = data["stat"]
+            # Логика прокачки (можно добавить стоимость)
+
+        elif action == "buy_item":
+            item = data["item"]
+            player = get_player(user_id)
+            if not player:
+                return  # ❌ Не можем купить — выходим
+
+            prices = {"health_potion": 100, "mana_potion": 80}
+            if player["gold"] < prices.get(item, 999):
+                # Недостаточно денег — ничего не делаем
+                return
+
+            inventory = player["inventory"]
+            inventory[item] = inventory.get(item, 0) + 1
+            new_gold = player["gold"] - prices[item]
+
+            save_player(
+                user_id=user_id,
+                name=player["name"],
+                race=player["race"],
+                cls=player["class"],
+                attributes=player["attributes"],
+                level=player["level"],
+                exp=player["exp"],
+                gold=new_gold,
+                inventory=inventory
+            )
+
+        elif action == "use_item":
+            item = data["item"]
+            player = get_player(user_id)
+            if not player or player["inventory"].get(item, 0) == 0:
+                return  # ❌ Не можем использовать — выходим
+
+            inventory = player["inventory"]
+            inventory[item] -= 1
+            if inventory[item] <= 0:
+                del inventory[item]
+
+            # Здесь можно начислить HP/MP при использовании
+            save_player(
+                user_id=user_id,
+                name=player["name"],
+                race=player["race"],
+                cls=player["class"],
+                attributes=player["attributes"],
+                level=player["level"],
+                exp=player["exp"],
+                gold=player["gold"],
+                inventory=inventory
+            )
+
+    except Exception as e:
+        logger.error(f"Ошибка обработки WebApp данных: {e}")
+
+@flask_app.route('/api/use_item', methods=['POST'])
+def api_use_item():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    item = data.get('item')
+
+    player = get_player(user_id)
+    if not player or player['inventory'].get(item, 0) == 0:
+        return jsonify({"error": "No item"}), 400
+
+    inventory = player['inventory']
+    inventory[item] -= 1
+    if inventory[item] <= 0:
+        del inventory[item]
+
+    save_player(
+        user_id=user_id,
+        name=player['name'],
+        race=player['race'],
+        cls=player['class'],
+        attributes=player['attributes'],
+        level=player['level'],
+        exp=player['exp'],
+        gold=player['gold'],
+        inventory=inventory
+    )
+    return jsonify({"success": True})
+
+@flask_app.route('/api/battle_reward', methods=['POST'])
+def api_battle_reward():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    exp = data.get('exp', 0)
+    gold = data.get('gold', 0)
+
+    player = get_player(user_id)
+    if not player:
+        return jsonify({"error": "Player not found"}), 400
+
+    new_exp = player['exp'] + exp
+    new_gold = player['gold'] + gold
+
+    # Простая система уровней
+    level = player['level']
+    while new_exp >= level * 100:
+        new_exp -= level * 100
+        level += 1
+
+    save_player(
+        user_id=user_id,
+        name=player['name'],
+        race=player['race'],
+        cls=player['class'],
+        attributes=player['attributes'],
+        level=level,
+        exp=new_exp,
+        gold=new_gold,
+        inventory=player['inventory']
+    )
+    return jsonify({"success": True, "level": level})
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"Ошибка: {context.error}")
+
+# === Запуск приложения ===
+if __name__ == '__main__':
+    init_db()
+
+    # Запускаем Flask
+    from threading import Thread
+    Thread(target=run_flask, daemon=True).start()
+
+    # Запуск Telegram бота
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
+    application.add_error_handler(error_handler)
+
+    print("🚀 Бот и Flask-сервер запущены!")
+    print(f"Открой в браузере: {WEB_APP_URL}")
+
+    if sys.version_info >= (3, 12):
+        with asyncio.Runner() as runner:
+            runner.run(application.run_polling())
+    else:
+        asyncio.run(application.run_polling())
+
+database.py
+import sqlite3
+import json
+import os
+
+# Папка для базы данных
+if not os.path.exists("data"):
+    os.makedirs("data")
+
+DB_PATH = "data/players.db"
+
+def init_db():
+    """Создаёт таблицу игроков с полем inventory"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS players (
+                user_id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                race TEXT NOT NULL,
+                class TEXT NOT NULL,
+                attributes TEXT NOT NULL,
+                level INTEGER DEFAULT 1,
+                exp INTEGER DEFAULT 0,
+                gold INTEGER DEFAULT 100,
+                inventory TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+def save_player(user_id, name, race, cls, attributes, level=None, exp=None, gold=None, inventory=None):
+    """Сохраняет игрока с возможностью обновления отдельных полей"""
+    player = get_player(user_id)
+
+    # Если игрок уже есть — используем его данные по умолчанию
+    if player:
+        level = level or player['level']
+        exp = exp or player['exp']
+        gold = gold or player['gold']
+        inventory = inventory or player['inventory']
+    else:
+        level = level or 1
+        exp = exp or 0
+        gold = gold or 100
+        inventory = inventory or {}
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO players
+            (user_id, name, race, class, attributes, level, exp, gold, inventory)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            name,
+            race,
+            cls,
+            json.dumps(attributes),
+            level,
+            exp,
+            gold,
+            json.dumps(inventory)
+        ))
+
+def get_player(user_id):
+    """Получает игрока из БД"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row  # Чтобы можно было обращаться по имени колонки
+        cursor = conn.execute("SELECT * FROM players WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        if row:
+            data = dict(row)
+            data['attributes'] = json.loads(data['attributes'])
+            data['inventory'] = json.loads(data['inventory'])  # Преобразуем JSON строку в словарь
+            return data
+        return None
+
+index.html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>⚔️ RPG Игра</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Верхняя панель */
+        .top-bar {
+            background: linear-gradient(180deg, #2d2d44 0%, #1f1f2e 100%);
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #3d3d5c;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            border: 2px solid #fff;
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .username {
+            font-weight: bold;
+            font-size: 14px;
+            color: #fff;
+        }
+
+        .user-level {
+            font-size: 12px;
+            color: #ffd700;
+        }
+
+        .resources {
+            display: flex;
+            gap: 12px;
+        }
+
+        .resource {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(0,0,0,0.3);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .energy { color: #ffd700; }
+        .gold { color: #ffa500; }
+
+        /* Основной контент */
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding-bottom: 80px;
+        }
+
+        .screen {
+            display: none;
+            min-height: 100%;
+        }
+
+        .active {
+            display: block;
+        }
+
+        /* Лобби (главный экран) */
+        .lobby-screen {
+            background: linear-gradient(180deg, #87CEEB 0%, #98D8E8 40%, #d4a574 100%);
+            position: relative;
+            min-height: 100%;
+        }
+
+        .castle-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 40%;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23d4a574" x="0" y="60" width="100" height="40"/><rect fill="%23c49464" x="10" y="40" width="20" height="60"/><rect fill="%23c49464" x="70" y="35" width="20" height="65"/><rect fill="%23b48454" x="35" y="50" width="30" height="50"/><circle fill="%2387CEEB" cx="50" cy="20" r="15" opacity="0.3"/></svg>');
+            background-size: cover;
+            opacity: 0.6;
+        }
+
+        .character-container {
+            position: relative;
+            height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+        }
+
+        .character {
+            font-size: 120px;
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.3));
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .stats-panel {
+            background: linear-gradient(180deg, #2d2d44 0%, #1f1f2e 100%);
+            margin: 16px;
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            justify-content: space-around;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            border: 2px solid #3d3d5c;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat-icon {
+            font-size: 24px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        .battle-button {
+            margin: 16px;
+            padding: 20px;
+            background: linear-gradient(180deg, #ffd700 0%, #ffa500 100%);
+            border: none;
+            border-radius: 16px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #1a1a2e;
+            cursor: pointer;
+            box-shadow: 0 6px 0 #b8860b, 0 10px 20px rgba(0,0,0,0.3);
+            transition: all 0.1s;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .battle-button:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #b8860b, 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        /* Нижняя навигация */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(180deg, #2d2d44 0%, #1f1f2e 100%);
+            display: flex;
+            justify-content: space-around;
+            padding: 8px 0;
+            border-top: 2px solid #3d3d5c;
+            z-index: 100;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 12px;
+            margin: 0 4px;
+        }
+
+        .nav-item.active {
+            background: rgba(102, 126, 234, 0.2);
+        }
+
+        .nav-icon {
+            font-size: 24px;
+        }
+
+        .nav-label {
+            font-size: 11px;
+            color: #888;
+            font-weight: 500;
+        }
+
+        .nav-item.active .nav-label {
+            color: #667eea;
+        }
+
+        /* Экраны инвентаря и прокачки */
+        .inventory-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            padding: 16px;
+        }
+
+        .equipment-slot {
+            aspect-ratio: 1;
+            background: linear-gradient(180deg, #2d2d44 0%, #1f1f2e 100%);
+            border: 2px solid #3d3d5c;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .equipment-slot:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+
+        .equipment-slot.filled {
+            border-color: #ffd700;
+            background: linear-gradient(180deg, #3d3d5c 0%, #2d2d44 100%);
+        }
+
+        .slot-icon {
+            font-size: 32px;
+        }
+
+        .slot-label {
+            font-size: 11px;
+            color: #888;
+        }
+
+        .slot-bonus {
+            font-size: 12px;
+            color: #00ff00;
+            font-weight: bold;
+        }
+
+        /* Дерево навыков */
+        .skill-tree {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .skill-row {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+        }
+
+        .skill-node {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(180deg, #2d2d44 0%, #1f1f2e 100%);
+            border: 3px solid #3d3d5c;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .skill-node.unlocked {
+            border-color: #667eea;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .skill-node.maxed {
+            border-color: #ffd700;
+        }
+
+        .skill-icon {
+            font-size: 28px;
+        }
+
+        .skill-bonus {
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 2px;
+        }
+
+        /* Формы и кнопки */
+        .form-container {
+            padding: 20px;
+            background: linear-gradient(180deg, #2d2d44 0%, #1f1f2e 100%);
+            margin: 16px;
+            border-radius: 16px;
+            border: 2px solid #3d3d5c;
+        }
+
+        .form-title {
+            font-size: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+            color: #ffd700;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 14px;
+            margin: 10px 0;
+            background: #1a1a2e;
+            border: 2px solid #3d3d5c;
+            border-radius: 12px;
+            color: white;
+            font-size: 16px;
+            outline: none;
+        }
+
+        input:focus, select:focus {
+            border-color: #667eea;
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 16px;
+            margin: 10px 0;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-btn:active {
+            transform: scale(0.98);
+        }
+
+        .back-btn {
+            background: #3d3d5c;
+        }
+
+        /* Бои */
+        .battle-arena {
+            padding: 20px;
+            min-height: 100%;
+            background: linear-gradient(180deg, #1a1a2e 0%, #2d1f3d 100%);
+        }
+
+        .fighter {
+            background: linear-gradient(180deg, #2d2d44 0%, #1f1f2e 100%);
+            border-radius: 16px;
+            padding: 20px;
+            margin: 16px 0;
+            border: 2px solid #3d3d5c;
+        }
+
+        .fighter-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .hp-bar-container {
+            background: #1a1a2e;
+            height: 24px;
+            border-radius: 12px;
+            overflow: hidden;
+            margin: 8px 0;
+            border: 2px solid #3d3d5c;
+        }
+
+        .hp-bar {
+            height: 100%;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .hp-bar.player { background: linear-gradient(90deg, #00ff00, #00cc00); }
+        .hp-bar.enemy { background: linear-gradient(90deg, #ff4444, #cc0000); }
+
+        .hp-text {
+            text-align: center;
+            font-size: 14px;
+            margin-top: 4px;
+            font-weight: bold;
+        }
+
+        .battle-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin: 20px 0;
+        }
+
+        .battle-log {
+            background: rgba(0,0,0,0.5);
+            border-radius: 12px;
+            padding: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 13px;
+            margin: 16px 0;
+        }
+
+        .log-entry {
+            margin: 4px 0;
+            padding: 4px;
+            border-left: 3px solid #667eea;
+            padding-left: 8px;
+        }
+
+        /* Toast уведомления */
+        .toast {
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(180deg, #2d2d44 0%, #1f1f2e 100%);
+            color: white;
+            padding: 14px 24px;
+            border-radius: 12px;
+            z-index: 1000;
+            font-size: 14px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+            border: 2px solid #667eea;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
+            to { transform: translateX(-50%) translateY(0); opacity: 1; }
+        }
+
+        /* Скроллбар */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a2e;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #3d3d5c;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #667eea;
+        }
+    </style>
+</head>
+<body>
+<!-- Верхняя панель -->
+<div class="top-bar">
+    <div class="user-info">
+        <div class="user-avatar">🐹</div>
+        <div class="user-details">
+            <div class="username" id="top-username">Игрок</div>
+            <div class="user-level">Lvl <span id="top-level">1</span></div>
+        </div>
+    </div>
+    <div class="resources">
+        <div class="resource energy">⚡ <span id="top-energy">250</span></div>
+        <div class="resource gold">💰 <span id="top-gold">100</span></div>
+    </div>
+</div>
+
+<!-- Основной контент -->
+<div class="main-content">
+    <!-- Лобби -->
+    <div id="lobby-screen" class="screen active lobby-screen">
+        <div class="castle-bg"></div>
+        <div class="character-container">
+            <div class="character" id="lobby-character">🐹</div>
+        </div>
+
+        <div class="stats-panel">
+            <div class="stat-item">
+                <div class="stat-icon">⚔️</div>
+                <div class="stat-value" id="stat-attack">31</div>
+                <div class="stat-label">Атака</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-icon">💪</div>
+                <div class="stat-value" id="stat-power">158</div>
+                <div class="stat-label">Сила</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-icon">❤️</div>
+                <div class="stat-value" id="stat-hp">100</div>
+                <div class="stat-label">HP</div>
+            </div>
+        </div>
+
+        <button class="battle-button" onclick="showScreen('battle-select')">
+            ⚔️ В БОЙ
+        </button>
+    </div>
+
+    <!-- Создание персонажа -->
+    <div id="create-screen" class="screen">
+        <div class="form-container">
+            <div class="form-title">🆕 Создание героя</div>
+            <input type="text" id="name" placeholder="Имя персонажа" maxlength="30" />
+            <select id="race">
+                <option value="Человек">🧑 Человек</option>
+                <option value="Эльф">🧝 Эльф</option>
+                <option value="Орк">👹 Орк</option>
+                <option value="Гном">🧔 Гном</option>
+                <option value="Некромант">💀 Некромант</option>
+            </select>
+            <select id="class">
+                <option value="Воин">⚔️ Воин</option>
+                <option value="Маг">🔮 Маг</option>
+                <option value="Лучник">🏹 Лучник</option>
+                <option value="Вор">🎭 Вор</option>
+                <option value="Жрец">🩸 Жрец</option>
+                <option value="Паладин">🛡️ Паладин</option>
+            </select>
+            <button class="action-btn" onclick="createCharacter()">Создать героя</button>
+        </div>
+    </div>
+
+    <!-- Выбор боя -->
+    <div id="battle-select-screen" class="screen">
+        <div class="form-container">
+            <div class="form-title">⚔️ Выбор противника</div>
+            <button class="action-btn" onclick="startBattle('Слизень', 1)">🦠 Слизень (Lvl 1)</button>
+            <button class="action-btn" onclick="startBattle('Волк', 3)">🐺 Волк (Lvl 3)</button>
+            <button class="action-btn" onclick="startBattle('Орк', 5)">👹 Орк (Lvl 5)</button>
+            <button class="action-btn" onclick="startBattle('Дракон', 10)">🐉 Дракон (Lvl 10)</button>
+            <button class="action-btn back-btn" onclick="showScreen('lobby')">← Назад</button>
+        </div>
+    </div>
+
+    <!-- Бой -->
+    <div id="battle-screen" class="screen">
+        <div class="battle-arena">
+            <div class="fighter">
+                <div class="fighter-name">️ Ваш герой</div>
+                <div class="hp-bar-container">
+                    <div id="player-hp-bar" class="hp-bar player" style="width: 100%"></div>
+                </div>
+                <div class="hp-text"><span id="player-hp">100</span> / <span id="player-max-hp">100</span> HP</div>
+            </div>
+
+            <div class="fighter">
+                <div class="fighter-name" id="monster-name">👹 Монстр</div>
+                <div class="hp-bar-container">
+                    <div id="monster-hp-bar" class="hp-bar enemy" style="width: 100%"></div>
+                </div>
+                <div class="hp-text"><span id="monster-hp">50</span> / <span id="monster-max-hp">50</span> HP</div>
+            </div>
+
+            <div class="battle-actions">
+                <button class="action-btn" onclick="playerAttack()">⚔️ Атака</button>
+                <button class="action-btn" id="potion-btn" onclick="useHealthPotion()">🧪 Зелье</button>
+            </div>
+
+            <div class="battle-log" id="battle-log"></div>
+        </div>
+    </div>
+
+    <!-- Инвентарь -->
+    <div id="inventory-screen" class="screen">
+        <div class="form-container">
+            <div class="form-title">🎒 Экипировка</div>
+        </div>
+        <div class="inventory-grid">
+            <div class="equipment-slot" onclick="equipItem('weapon')">
+                <div class="slot-icon">⚔️</div>
+                <div class="slot-label">Оружие</div>
+                <div class="slot-bonus" id="bonus-weapon">+0</div>
+            </div>
+            <div class="equipment-slot" onclick="equipItem('helmet')">
+                <div class="slot-icon">🪖</div>
+                <div class="slot-label">Шлем</div>
+                <div class="slot-bonus" id="bonus-helmet">+0</div>
+            </div>
+            <div class="equipment-slot" onclick="equipItem('armor')">
+                <div class="slot-icon">👕</div>
+                <div class="slot-label">Броня</div>
+                <div class="slot-bonus" id="bonus-armor">+0</div>
+            </div>
+            <div class="equipment-slot" onclick="equipItem('boots')">
+                <div class="slot-icon">👢</div>
+                <div class="slot-label">Сапоги</div>
+                <div class="slot-bonus" id="bonus-boots">+0</div>
+            </div>
+            <div class="equipment-slot" onclick="equipItem('ring')">
+                <div class="slot-icon">💍</div>
+                <div class="slot-label">Кольцо</div>
+                <div class="slot-bonus" id="bonus-ring">+0</div>
+            </div>
+            <div class="equipment-slot" onclick="equipItem('amulet')">
+                <div class="slot-icon">📿</div>
+                <div class="slot-label">Амулет</div>
+                <div class="slot-bonus" id="bonus-amulet">+0</div>
+            </div>
+        </div>
+        <div class="form-container" style="margin-top: 16px;">
+            <div class="form-title">🎒 Предметы</div>
+            <div id="inventory-items">
+                <p style="text-align: center; color: #888; padding: 20px;">Инвентарь пуст</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Дерево навыков -->
+    <div id="skill-tree-screen" class="screen">
+        <div class="form-container">
+            <div class="form-title">🌳 Дерево навыков</div>
+            <div style="text-align: center; margin-bottom: 16px; color: #ffd700;">
+                Очки навыков: <span id="skill-points">0</span>
+            </div>
+        </div>
+        <div class="skill-tree">
+            <div class="skill-row">
+                <div class="skill-node unlocked" onclick="upgradeSkill('str')">
+                    <div class="skill-icon">💪</div>
+                    <div class="skill-bonus">+5</div>
+                </div>
+                <div class="skill-node unlocked" onclick="upgradeSkill('con')">
+                    <div class="skill-icon">❤️</div>
+                    <div class="skill-bonus">+14</div>
+                </div>
+                <div class="skill-node unlocked" onclick="upgradeSkill('dex')">
+                    <div class="skill-icon">⚡</div>
+                    <div class="skill-bonus">+2</div>
+                </div>
+            </div>
+            <div class="skill-row">
+                <div class="skill-node" onclick="upgradeSkill('str2')">
+                    <div class="skill-icon">💀</div>
+                    <div class="skill-bonus">+2%</div>
+                </div>
+                <div class="skill-node" onclick="upgradeSkill('con2')">
+                    <div class="skill-icon">️</div>
+                    <div class="skill-bonus">+15</div>
+                </div>
+                <div class="skill-node" onclick="upgradeSkill('dex2')">
+                    <div class="skill-icon">🎯</div>
+                    <div class="skill-bonus">+2</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Магазин -->
+    <div id="shop-screen" class="screen">
+        <div class="form-container">
+            <div class="form-title">🛒 Магазин</div>
+            <button class="action-btn" onclick="buyItem('health_potion')">🧪 Зелье здоровья (+50 HP)<br><small>100 💰</small></button>
+            <button class="action-btn" onclick="buyItem('mana_potion')">⚡ Зелье маны (+30 MP)<br><small>80 💰</small></button>
+            <button class="action-btn" onclick="buyItem('sword')">⚔️ Меч (+10 ATK)<br><small>500 💰</small></button>
+            <button class="action-btn" onclick="buyItem('shield')">🛡️ Щит (+15 DEF)<br><small>450 💰</small></button>
+        </div>
+    </div>
+
+    <!-- Профиль -->
+    <div id="profile-screen" class="screen">
+        <div class="form-container">
+            <div class="form-title">👤 Профиль</div>
+            <div style="text-align: center; margin: 20px 0;">
+                <div style="font-size: 80px; margin-bottom: 10px;">🐹</div>
+                <div style="font-size: 24px; font-weight: bold;" id="p-name">Игрок</div>
+                <div style="color: #ffd700; margin-top: 8px;">Уровень <span id="p-level">1</span></div>
+            </div>
+            <div style="background: #1a1a2e; padding: 16px; border-radius: 12px; margin: 12px 0;">
+                <div style="display: flex; justify-content: space-between; margin: 8px 0;">
+                    <span>Опыт:</span>
+                    <span id="p-exp">0 / 100</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 8px 0;">
+                    <span>Золото:</span>
+                    <span id="p-gold" style="color: #ffd700;">100</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin: 8px 0;">
+                    <span>Побед:</span>
+                    <span id="p-wins">0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Нижняя навигация -->
+<div class="bottom-nav">
+    <div class="nav-item" onclick="showScreen('shop')">
+        <div class="nav-icon">🏪</div>
+        <div class="nav-label">Магазин</div>
+    </div>
+    <div class="nav-item" onclick="showScreen('inventory')">
+        <div class="nav-icon">🎒</div>
+        <div class="nav-label">Инвентарь</div>
+    </div>
+    <div class="nav-item active" onclick="showScreen('lobby')">
+        <div class="nav-icon">⚔️</div>
+        <div class="nav-label">Лобби</div>
+    </div>
+    <div class="nav-item" onclick="showScreen('skill-tree')">
+        <div class="nav-icon">🌳</div>
+        <div class="nav-label">Навыки</div>
+    </div>
+    <div class="nav-item" onclick="showScreen('profile')">
+        <div class="nav-icon">🏆</div>
+        <div class="nav-label">Профиль</div>
+    </div>
+</div>
+
+<script>
+    const tg = Telegram.WebApp;
+    tg.expand();
+    tg.ready();
+
+    // Глобальные переменные
+    let playerData = {
+        name: 'Игрок',
+        level: 1,
+        exp: 0,
+        gold: 100,
+        energy: 250,
+        attack: 31,
+        power: 158,
+        hp: 100,
+        maxHp: 100,
+        inventory: {},
+        equipment: {},
+        skillPoints: 0
+    };
+
+    let battleState = null;
+
+    // Навигация
+    function showScreen(screenId) {
+        // Скрываем все экраны
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+
+        // Показываем нужный
+        const targetScreen = document.getElementById(screenId + '-screen');
+        if (targetScreen) {
+            targetScreen.classList.add('active');
+        }
+
+        // Обновляем активную кнопку навигации
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.classList.remove('active');
+        });
+
+        // Находим соответствующую кнопку (упрощённо)
+        const navMap = {
+            'lobby': 2,
+            'inventory': 1,
+            'skill-tree': 3,
+            'shop': 0,
+            'profile': 4
+        };
+
+        if (navMap[screenId] !== undefined) {
+            document.querySelectorAll('.nav-item')[navMap[screenId]].classList.add('active');
+        }
+
+        // Загружаем данные если нужно
+        if (screenId === 'profile') loadPlayer();
+        if (screenId === 'inventory') loadInventory();
+        if (screenId === 'lobby') updateLobby();
+    }
+
+    // Обновление лобби
+    function updateLobby() {
+        document.getElementById('stat-attack').textContent = playerData.attack;
+        document.getElementById('stat-power').textContent = playerData.power;
+        document.getElementById('stat-hp').textContent = playerData.hp;
+        updateTopBar();
+    }
+
+    // Обновление верхней панели
+    function updateTopBar() {
+        document.getElementById('top-username').textContent = playerData.name;
+        document.getElementById('top-level').textContent = playerData.level;
+        document.getElementById('top-energy').textContent = playerData.energy;
+        document.getElementById('top-gold').textContent = playerData.gold;
+    }
+
+    // Toast уведомления
+    function showToast(message) {
+        const existing = document.querySelector('.toast');
+        if (existing) existing.remove();
+
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    // Создание персонажа
+    async function createCharacter() {
+        const name = document.getElementById("name").value.trim();
+        const race = document.getElementById("race").value;
+        const cls = document.getElementById("class").value;
+
+        if (name.length < 3) {
+            showToast("Имя должно быть от 3 символов");
+            return;
+        }
+
+        const baseAttrs = {
+            "Воин": { str: 8, con: 10, dex: 6, int: 4 },
+            "Маг": { str: 4, con: 5, dex: 6, int: 10 },
+            "Лучник": { str: 6, con: 6, dex: 10, int: 6 },
+            "Вор": { str: 5, con: 5, dex: 12, int: 6 },
+            "Жрец": { str: 5, con: 7, dex: 6, int: 9 },
+            "Паладин": { str: 9, con: 9, dex: 5, int: 7 }
+        };
+
+        playerData.name = name;
+        playerData.attack = baseAttrs[cls].str * 3;
+        playerData.power = baseAttrs[cls].con * 10;
+        playerData.maxHp = baseAttrs[cls].con * 10;
+        playerData.hp = playerData.maxHp;
+
+        showToast(`Герой ${name} создан!`);
+        updateTopBar();
+        updateLobby();
+        showScreen('lobby');
+    }
+
+    // Загрузка игрока
+    async function loadPlayer() {
+        document.getElementById('p-name').textContent = playerData.name;
+        document.getElementById('p-level').textContent = playerData.level;
+        document.getElementById('p-exp').textContent = `${playerData.exp} / ${playerData.level * 100}`;
+        document.getElementById('p-gold').textContent = playerData.gold;
+    }
+
+    // Инвентарь
+    async function loadInventory() {
+        const container = document.getElementById('inventory-items');
+        if (Object.keys(playerData.inventory).length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: #888; padding: 20px;">Инвентарь пуст</p>';
+        } else {
+            container.innerHTML = '';
+            for (const [item, count] of Object.entries(playerData.inventory)) {
+                const div = document.createElement('div');
+                div.style.cssText = 'background: #1a1a2e; padding: 12px; margin: 8px 0; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;';
+                div.innerHTML = `
+                    <span>${getItemName(item)} ×${count}</span>
+                    <button onclick="useItem('${item}')" style="background: #667eea; border: none; color: white; padding: 6px 12px; border-radius: 6px; cursor: pointer;">Использовать</button>
+                `;
+                container.appendChild(div);
+            }
+        }
+    }
+
+    function getItemName(item) {
+        const names = {
+            'health_potion': '🧪 Зелье здоровья',
+            'mana_potion': '⚡ Зелье маны',
+            'sword': '⚔️ Меч',
+            'shield': '🛡️ Щит'
+        };
+        return names[item] || item;
+    }
+
+    async function useItem(item) {
+        if (item === 'health_potion') {
+            playerData.hp = Math.min(playerData.maxHp, playerData.hp + 50);
+            playerData.inventory[item]--;
+            if (playerData.inventory[item] <= 0) delete playerData.inventory[item];
+            showToast('HP восстановлено!');
+            updateLobby();
+            loadInventory();
+        }
+    }
+
+    function equipItem(slot) {
+        showToast('Слот экипировки: ' + slot);
+    }
+
+    // Боевая система
+    function startBattle(monsterName, level) {
+        battleState = {
+            monster: {
+                name: monsterName,
+                level,
+                hp: level * 20,
+                maxHp: level * 20,
+                attack: Math.floor(level * 3 + Math.random() * 5)
+            },
+            player: {
+                hp: playerData.hp,
+                maxHp: playerData.maxHp,
+                attack: playerData.attack
+            }
+        };
+
+        document.getElementById('monster-name').textContent = `👹 ${monsterName} (Lvl ${level})`;
+        document.getElementById('monster-hp').textContent = battleState.monster.hp;
+        document.getElementById('monster-max-hp').textContent = battleState.monster.maxHp;
+        document.getElementById('monster-hp-bar').style.width = '100%';
+
+        document.getElementById('player-hp').textContent = battleState.player.hp;
+        document.getElementById('player-max-hp').textContent = battleState.player.maxHp;
+        document.getElementById('player-hp-bar').style.width = '100%';
+
+        document.getElementById('battle-log').innerHTML = '';
+        logBattle(`⚔️ Бой начался! Вы против ${monsterName} (ур. ${level})`);
+
+        updatePotionButton();
+        showScreen('battle');
+    }
+
+    function logBattle(text) {
+        const log = document.getElementById('battle-log');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.textContent = text;
+        log.appendChild(entry);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function playerAttack() {
+        if (!battleState) return;
+
+        const damage = Math.floor(battleState.player.attack * (0.8 + Math.random() * 0.4));
+        battleState.monster.hp = Math.max(0, battleState.monster.hp - damage);
+
+        updateMonsterHP();
+        logBattle(`💥 Вы нанесли ${damage} урона!`);
+
+        if (battleState.monster.hp <= 0) {
+            setTimeout(() => endBattle(true), 500);
+            return;
+        }
+
+        setTimeout(monsterAttack, 800);
+    }
+
+    function monsterAttack() {
+        if (!battleState) return;
+
+        const damage = Math.floor(battleState.monster.attack * (0.8 + Math.random() * 0.4));
+        battleState.player.hp = Math.max(0, battleState.player.hp - damage);
+
+        updatePlayerHP();
+        logBattle(`🩸 ${battleState.monster.name} наносит ${damage} урона!`);
+
+        if (battleState.player.hp <= 0) {
+            setTimeout(() => endBattle(false), 500);
+        }
+    }
+
+    function updateMonsterHP() {
+        const { hp, maxHp } = battleState.monster;
+        document.getElementById('monster-hp').textContent = hp;
+        document.getElementById('monster-hp-bar').style.width = `${(hp / maxHp) * 100}%`;
+    }
+
+    function updatePlayerHP() {
+        const { hp, maxHp } = battleState.player;
+        document.getElementById('player-hp').textContent = hp;
+        document.getElementById('player-hp-bar').style.width = `${(hp / maxHp) * 100}%`;
+        playerData.hp = hp;
+    }
+
+    function updatePotionButton() {
+        const potionBtn = document.getElementById('potion-btn');
+        const hasPotion = playerData.inventory['health_potion'] > 0;
+        potionBtn.disabled = !hasPotion;
+        potionBtn.style.opacity = hasPotion ? '1' : '0.5';
+    }
+
+    function useHealthPotion() {
+        if (battleState.player.hp >= battleState.player.maxHp) {
+            showToast("HP полон!");
+            return;
+        }
+        if (!playerData.inventory['health_potion']) {
+            showToast("Нет зелий!");
+            return;
+        }
+
+        battleState.player.hp = Math.min(battleState.player.maxHp, battleState.player.hp + 50);
+        updatePlayerHP();
+        playerData.inventory['health_potion']--;
+        logBattle("💚 Вы использовали зелье здоровья!");
+        updatePotionButton();
+    }
+
+    async function endBattle(win) {
+        if (win) {
+            const expReward = battleState.monster.level * 50;
+            const goldReward = battleState.monster.level * 30;
+
+            playerData.exp += expReward;
+            playerData.gold += goldReward;
+
+            // Level up check
+            if (playerData.exp >= playerData.level * 100) {
+                playerData.level++;
+                playerData.exp = 0;
+                playerData.maxHp += 20;
+                playerData.hp = playerData.maxHp;
+                playerData.attack += 5;
+                showToast(`🎉 Уровень повышен! Теперь ${playerData.level}!`);
+            } else {
+                showToast(`🏆 Победа! +${expReward} XP, +${goldReward} 💰`);
+            }
+
+            logBattle(`✅ Победа! Получено ${expReward} опыта и ${goldReward} золота.`);
+        } else {
+            logBattle("💀 Вы проиграли...");
+            showToast("Поражение...");
+        }
+
+        setTimeout(() => {
+            updateTopBar();
+            updateLobby();
+            showScreen('lobby');
+        }, 2000);
+    }
+
+    // Магазин
+    function buyItem(item) {
+        const prices = {
+            'health_potion': 100,
+            'mana_potion': 80,
+            'sword': 500,
+            'shield': 450
+        };
+
+        if (playerData.gold >= prices[item]) {
+            playerData.gold -= prices[item];
+            playerData.inventory[item] = (playerData.inventory[item] || 0) + 1;
+            showToast(`Куплено: ${getItemName(item)}`);
+            updateTopBar();
+        } else {
+            showToast("Недостаточно золота!");
+        }
+    }
+
+    // Навыки
+    function upgradeSkill(skill) {
+        if (playerData.skillPoints > 0) {
+            playerData.skillPoints--;
+            showToast(`Навык ${skill} улучшен!`);
+            document.getElementById('skill-points').textContent = playerData.skillPoints;
+        } else {
+            showToast("Нет очков навыков!");
+        }
+    }
+
+    // Инициализация
+    window.addEventListener('load', () => {
+        updateTopBar();
+        updateLobby();
+
+        // Проверяем Telegram WebApp
+        if (tg.initDataUnsafe?.user) {
+            const user = tg.initDataUnsafe.user;
+            playerData.name = user.first_name || 'Игрок';
+            updateTopBar();
+        }
+    });
+</script>
+</body>
+</html>

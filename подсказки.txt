@@ -1,7 +1,14 @@
+git add .
+git commit -m
+git push
+
+
+
+
 git config --global user.name "vladimirGoLLUM"
 git config --global user.email "gollum@21051992.ru"
 
-echo "# Telegram-game-bot" >> README.md
+
 git init
 git add README.md
 git commit -m "first commit"
@@ -10,3 +17,28 @@ git remote add origin https://github.com/vladimirGoLLUM/Telegram-game-bot.git
 git push -u origin main
 
 
+https://github.com/vladimirGoLLUM/Telegram-game-bot
+
+
+#загрузить репозиторий в github.com
+# 1. Укажи свои данные
+git config --global user.name "vladimirGoLLUM"
+git config --global user.email "ваш-email@gmail.com"
+
+# 2. Добавь все файлы
+git add .
+
+# 3. Сделай первый коммит
+git commit -m "first commit"
+
+# 4. Удали старый origin (если есть)
+git remote remove origin
+
+# 5. Добавь GitHub-репозиторий
+git remote add origin https://github.com/vladimirGoLLUM/Telegram-game-bot.git
+
+# 6. Переименуй ветку в main
+git branch -M main
+
+# 7. Отправь на GitHub
+git push -u origin main

@@ -29,6 +29,7 @@ WEB_APP_URL = "https://web-production-d46f0.up.railway.app"
 # === Flask приложение ===
 flask_app = Flask(__name__)
 
+
 # API: Получение данных игрока
 @flask_app.route('/api/player')
 def api_get_player():
@@ -49,10 +50,6 @@ def index():
     """Главная страница — игра"""
     return send_from_directory('webapp', 'index.html')
 
-@app.route('/<path:filename>')
-def serve_static(filename):
-    """Обслуживание статики: JS, CSS, изображения"""
-    return send_from_directory('webapp', filename)
 
 # Запуск Flask в отдельном потоке
 def run_flask():

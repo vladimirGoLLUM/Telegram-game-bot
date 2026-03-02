@@ -53,7 +53,8 @@ def index():
 
 # Запуск Flask в отдельном потоке
 def run_flask():
-    flask_app.run(host='0.0.0.0', port=8000, threaded=True)
+    port = int(os.getenv("PORT", 8000))  # Важно: использовать PORT
+    flask_app.run(host='0.0.0.0', port=port, threaded=True)
 
 # === Генерация главного меню с user_id в URL ===
 def get_main_menu(user_id):

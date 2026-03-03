@@ -1,158 +1,160 @@
-let player = { attributes: {}, inventory: {} };
+let attributes = { STR: 5, AGI: 5, INT: 5, VIT: 5, DEX: 5, LUK: 5 };
+let pointsLeft = 25;
 
-// Загрузка данных игрока
-async function loadPlayer() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const user_id = urlParams.get('user_id');
+// Конфигурация спрайтов — можно заменить на свои URL
+const SPRITES = {
+    // Тело (по полу)
+    body: {
+        Мужской: "https://i.imgur.com/XqCJbYf.png",
+        Женский: "https://i.imgur.com/9uRqJ5T.png"
+    },
+    // Причёски
+    hair: {
+        "Короткие": "https://i.imgur.com/mVXeZkL.png",
+        "Длинные": "https://i.imgur.com/KeF2nl7.png",
+        "Лысый": null,
+        "Косы": "https://i.imgur.com/KeF2nl7_tress.png"
+    },
+    // Одежда по классу
+    classOutfit: {
+        "Воин": "https://i.imgur.com/rmFQa1c.png",
+        "Маг": "https://i.imgur.com/8Wt6R0D.png",
+        "Разбойник": "https://i.imgur.com/5VvB1Nj.png",
+        "Жрец": "https://i.imgur.com/7GgMnYp.png"
+    },
+    // Цвет кожи → фильтр яркости/насыщенности
+    skinTone: {
+        "Светлая": "brightness(1) saturate(1)",
+        "Средняя": "brightness(0.85) saturate(1.1)",
+        "Тёмная": "brightness(0.6) saturate(1.3)"
+    }
+};
 
-    if (!user_id) {
-        alert("Не указан user_id");
-        return;
+// Обновление интерфейса
+function updateStatDisplay() {
+    document.getElementById('str').textContent = attributes.STR;
+    document.getElementById('agi').textContent = attributes.AGI;
+    document.getElementById('int').textContent = attributes.INT;
+    document.getElementById('vit').textContent = attributes.VIT;
+    document.getElementById('dex').textContent = attributes.DEX;
+    document.getElementById('luk').textContent = attributes.LUK;
+    document.getElementById('points-left').textContent = pointsLeft;
+
+    // Активность кнопки
+    const btn = document.getElementById('create-btn');
+    btn.disabled = pointsLeft !== 0 || !document.getElementById('char-name').value.trim();
+
+    // Обновляем предпросмотр
+    updatePreview();
+}
+
+// Обновление предпросмотра персонажа
+function updatePreview() {
+    const gender = document.getElementById('char-gender').value;
+    const skin = document.getElementById('char-skin').value;
+    const hair = document.getElementById('char-hair').value;
+    const cls = document.getElementById('char-class').value;
+
+    // --- Слой: Тело ---
+    const bodyImg = document.getElementById('body-sprite');
+    bodyImg.src = SPRITES.body[gender] || SPRITES.body['Мужской'];
+    bodyImg.style.filter = SPRITES.skinTone[skin] || 'none';
+
+    // --- Слой: Причёска ---
+    const hairImg = document.getElementById('hair-sprite');
+    const hairSrc = SPRITES.hair[hair];
+    if (hairSrc) {
+        hairImg.src = hairSrc;
+        hairImg.style.display = 'block';
+    } else {
+        hairImg.style.display = 'none'; // Лысый
     }
 
-    const response = await fetch(`/api/player?user_id=${user_id}`);
-    player = await response.json();
+    // --- Слой: Одежда ---
+    const classImg = document.getElementById('class-sprite');
+    classImg.src = SPRITES.classOutfit[cls] || "";
 
-    if (!player) {
-        // Создание персонажа
-        await createCharacter(user_id);
+    // --- Описание ---
+    document.getElementById('preview-desc').textContent =
+        `${gender}, ${skin} кожа, ${hair}`;
+}
+
+// Прокачка характеристик
+function incStat(stat) {
+    if (pointsLeft > 0) {
+        attributes[stat]++;
+        pointsLeft--;
+        updateStatDisplay();
     }
+}
 
-    updateUI();
+function decStat(stat) {
+    if (attributes[stat] > 1) {
+        attributes[stat]--;
+        pointsLeft++;
+        updateStatDisplay();
+    }
 }
 
 // Создание персонажа
-async function createCharacter(user_id) {
-    const data = {
-        action: "create_character",
-        user_id: user_id,
-        name: "Герой",
-        race: "Человек",
-        class: "Воин",
-        attributes: { STR: 10, AGI: 5, INT: 3, VIT: 8, DEX: 6, LUK: 2 }
-    };
+async function createCharacter() {
+    const name = document.getElementById('char-name').value.trim();
+    const race = document.getElementById('char-race').value;
+    const cls = document.getElementById('char-class').value;
 
-    await fetch('/api/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    });
-
-    player = await (await fetch(`/api/player?user_id=${user_id}`)).json();
-}
-
-// Обновление интерфейса
-function updateUI() {
-    document.getElementById('player-name').textContent = player.name || 'Герой';
-    document.getElementById('player-level').textContent = player.level || 1;
-    document.getElementById('gold').textContent = player.gold || 0;
-
-    const exp = player.exp || 0;
-    const level = player.level || 1;
-    const nextLevelExp = level * 100;
-    const expPercent = (exp / nextLevelExp) * 100;
-    document.getElementById('exp-bar').style.width = `${Math.min(expPercent, 100)}%`;
-
-    // Характеристики
-    for (const [key, value] of Object.entries(player.attributes)) {
-        const el = document.getElementById(key.toLowerCase());
-        if (el) el.textContent = value;
+    if (!name) {
+        alert("Введите имя!");
+        return;
     }
 
-    // Инвентарь
-    const invEl = document.getElementById('inventory-items');
-    invEl.innerHTML = '';
-    for (const [item, count] of Object.entries(player.inventory)) {
-        const itemEl = document.createElement('div');
-        itemEl.textContent = `${item}: ${count} шт.`;
-        itemEl.style.margin = '5px 0';
-        itemEl.onclick = () => useItem(item);
-        invEl.appendChild(itemEl);
+    if (pointsLeft !== 0) {
+        alert("Распределите все очки!");
+        return;
+    }
+
+    const appearance = {
+        gender: document.getElementById('char-gender').value,
+        skin: document.getElementById('char-skin').value,
+        hair: document.getElementById('char-hair').value
+    };
+
+    const userData = {
+        user_id: new URLSearchParams(window.location.search).get('user_id'),
+        name,
+        race,
+        class: cls,
+        attributes: { ...attributes },
+        appearance
+    };
+
+    try {
+        const response = await fetch('/api/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userData)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`Персонаж "${name}" создан!\nКласс: ${cls}\nРаса: ${race}`);
+            window.location.href = '/'; // Перейти в игру
+        } else {
+            alert("Ошибка при создании");
+        }
+    } catch (err) {
+        console.error(err);
+        alert("Ошибка соединения");
     }
 }
 
-// Прокачка характеристики
-async function upgradeStat(stat) {
-    const data = {
-        action: "upgrade_stat",
-        stat: stat,
-        user_id: new URLSearchParams(window.location.search).get('user_id')
-    };
+// Инициализация при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    updateStatDisplay();
 
-    await fetch('/api/player', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    });
-
-    // Обновляем локально (или можно перезагрузить)
-    player.attributes[stat] = (player.attributes[stat] || 1) + 1;
-    updateUI();
-}
-
-// Покупка предмета
-async function buyItem(item) {
-    const data = {
-        action: "buy_item",
-        item: item,
-        user_id: new URLSearchParams(window.location.search).get('user_id')
-    };
-
-    await fetch('/api/player', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    });
-
-    // Перезагружаем игрока
-    loadPlayer();
-}
-
-// Использование предмета
-async function useItem(item) {
-    const data = {
-        action: "use_item",
-        item: item,
-        user_id: new URLSearchParams(window.location.search).get('user_id')
-    };
-
-    await fetch('/api/use_item', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    });
-
-    loadPlayer();
-}
-
-// Начало боя
-async function startBattle() {
-    const monster = "Гоблин";
-    const level = 1;
-
-    const data = {
-        action: "start_battle",
-        monster: monster,
-        level: level,
-        user_id: new URLSearchParams(window.location.search).get('user_id')
-    };
-
-    await fetch('/api/player', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    });
-
-    // Награда за бой
-    await fetch('/api/battle_reward', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: data.user_id, exp: 50, gold: 30 })
-    });
-
-    alert(`Победил ${monster}! +50 опыта, +30 золота`);
-    loadPlayer();
-}
-
-// Загружаем игрока при старте
-window.onload = loadPlayer;
+    // Добавляем слушатели
+    document.getElementById('char-gender').onchange = updatePreview;
+    document.getElementById('char-skin').onchange = updatePreview;
+    document.getElementById('char-hair').onchange = updatePreview;
+    document.getElementById('char-class').onchange = updatePreview;
+});

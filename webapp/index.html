@@ -3,71 +3,136 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Ролевая игра</title>
+    <title>Создание персонажа</title>
     <link rel="stylesheet" href="style.css" />
+    <!-- Готический шрифт -->
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@900&family=Roboto:wght@300;400&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <!-- Шапка -->
-        <header>
-            <h1 id="player-name">Игрок</h1>
-            <div class="level-bar">
-                <span>Уровень <strong id="player-level">1</strong></span>
-                <div class="exp-container">
-                    <div class="exp-bar" id="exp-bar"></div>
-                </div>
-            </div>
-            <p>Золото: <strong id="gold">0</strong></p>
+    <div class="exile-container">
+        <header class="exile-header">
+            <h1>⚔️ Создай своего героя</h1>
         </header>
 
-        <!-- Характеристики -->
-        <section class="stats">
-            <h2>Характеристики</h2>
-            <div class="stat-row">
-                <label>СИЛ</label>
-                <span id="str">1</span>
-                <button onclick="upgradeStat('STR')">+</button>
+        <main class="creation-form">
+            <!-- Имя -->
+            <div class="input-group">
+                <label>Имя персонажа</label>
+                <input type="text" id="char-name" placeholder="Например: Рагнар" maxlength="16" required />
             </div>
-            <div class="stat-row">
-                <label>ЛОВ</label>
-                <span id="agi">1</span>
-                <button onclick="upgradeStat('AGI')">+</button>
-            </div>
-            <div class="stat-row">
-                <label>ИНТ</label>
-                <span id="int">1</span>
-                <button onclick="upgradeStat('INT')">+</button>
-            </div>
-            <div class="stat-row">
-                <label>ВЫН</label>
-                <span id="vit">1</span>
-                <button onclick="upgradeStat('VIT')">+</button>
-            </div>
-            <div class="stat-row">
-                <label>ЛОВК</label>
-                <span id="dex">1</span>
-                <button onclick="upgradeStat('DEX')">+</button>
-            </div>
-            <div class="stat-row">
-                <label>УДАЧА</label>
-                <span id="luk">1</span>
-                <button onclick="upgradeStat('LUK')">+</button>
-            </div>
-        </section>
 
-        <!-- Инвентарь -->
-        <section class="inventory">
-            <h2>Инвентарь</h2>
-            <button onclick="buyItem('health_potion')">Купить зелье здоровья (+50 HP) — 100💰</button>
-            <button onclick="buyItem('mana_potion')">Купить зелье маны — 80💰</button>
-            <div id="inventory-items"></div>
-        </section>
+            <!-- Раса -->
+            <div class="input-group">
+                <label>Раса</label>
+                <select id="char-race">
+                    <option value="Человек">Человек</option>
+                    <option value="Эльф">Эльф</option>
+                    <option value="Орк">Орк</option>
+                    <option value="Гном">Гном</option>
+                </select>
+            </div>
 
-        <!-- Бой -->
-        <section class="battle">
-            <h2>Бой</h2>
-            <button onclick="startBattle()">Сражаться!</button>
-        </section>
+            <!-- Класс -->
+            <div class="input-group">
+                <label>Класс</label>
+                <select id="char-class">
+                    <option value="Воин">Воин</option>
+                    <option value="Маг">Маг</option>
+                    <option value="Разбойник">Разбойник</option>
+                    <option value="Жрец">Жрец</option>
+                </select>
+            </div>
+
+            <!-- Внешность -->
+            <div class="appearance-section">
+                <h3>Внешность</h3>
+
+                <div class="input-group">
+                    <label>Пол</label>
+                    <select id="char-gender">
+                        <option value="Мужской">Мужской</option>
+                        <option value="Женский">Женский</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Цвет кожи</label>
+                    <select id="char-skin">
+                        <option value="Светлая">Светлая</option>
+                        <option value="Средняя">Средняя</option>
+                        <option value="Тёмная">Тёмная</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Причёска</label>
+                    <select id="char-hair">
+                        <option value="Короткие">Короткие</option>
+                        <option value="Длинные">Длинные</option>
+                        <option value="Лысый">Лысый</option>
+                        <option value="Косы">Косы</option>
+                    </select>
+                </div>
+
+                <!-- Предпросмотр -->
+                <div class="preview-box">
+                    <h4>Предпросмотр</h4>
+                    <div id="character-preview" class="character-container">
+                        <img id="body-sprite" class="sprite-layer" src="" alt="Тело"/>
+                        <img id="hair-sprite" class="sprite-layer" src="" alt="Причёска"/>
+                        <img id="class-sprite" class="sprite-layer" src="" alt="Одежда"/>
+                    </div>
+                    <p id="preview-desc">Герой, Мужской, Светлая кожа, Короткие волосы</p>
+                </div>
+
+            <!-- Характеристики -->
+            <div class="stats-grid">
+                <h3>Характеристики (распределите 25 очков)</h3>
+                <p>Осталось: <strong id="points-left">25</strong></p>
+
+                <div class="stat-row">
+                    <label>СИЛ</label>
+                    <button onclick="decStat('STR')">−</button>
+                    <span id="str">5</span>
+                    <button onclick="incStat('STR')">+</button>
+                </div>
+                <div class="stat-row">
+                    <label>ЛОВ</label>
+                    <button onclick="decStat('AGI')">−</button>
+                    <span id="agi">5</span>
+                    <button onclick="incStat('AGI')">+</button>
+                </div>
+                <div class="stat-row">
+                    <label>ИНТ</label>
+                    <button onclick="decStat('INT')">−</button>
+                    <span id="int">5</span>
+                    <button onclick="incStat('INT')">+</button>
+                </div>
+                <div class="stat-row">
+                    <label>ВЫН</label>
+                    <button onclick="decStat('VIT')">−</button>
+                    <span id="vit">5</span>
+                    <button onclick="incStat('VIT')">+</button>
+                </div>
+                <div class="stat-row">
+                    <label>ЛОВК</label>
+                    <button onclick="decStat('DEX')">−</button>
+                    <span id="dex">5</span>
+                    <button onclick="incStat('DEX')">+</button>
+                </div>
+                <div class="stat-row">
+                    <label>УДАЧА</label>
+                    <button onclick="decStat('LUK')">−</button>
+                    <span id="luk">5</span>
+                    <button onclick="incStat('LUK')">+</button>
+                </div>
+            </div>
+
+            <!-- Кнопка создания -->
+            <button id="create-btn" class="create-button" onclick="createCharacter()">
+                Создать персонажа
+            </button>
+        </main>
     </div>
 
     <script src="script.js"></script>

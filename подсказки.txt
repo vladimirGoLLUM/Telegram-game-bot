@@ -1,5 +1,5 @@
 git add .
-git commit -m
+git commit -m  ?
 git push
 
 
@@ -53,3 +53,25 @@ git branch -M main
 
 # 7. Отправь на GitHub
 git push -u origin main
+
+
+
+
+A front-facing pixel art character body of a male warrior, standing in neutral pose (T-pose or idle), no clothes, solid color skin tone, high contrast, transparent background, 120x120 pixels, RPG game sprite, no shadows, clean lines, flat design
+
+A front-facing pixel art character body of a female warrior, standing in neutral pose (T-pose or idle), no clothes, solid color skin tone, transparent background, 120x120 pixels, RPG game sprite, no shadows, clean lines, flat design
+
+Pixel art short haircut for a male RPG character, front view, brown hair, sharp clean lines, isolated on transparent background, 120x120 pixels, no face, only hair, game sprite, top-down or full-body style
+
+Pixel art long flowing hair for a female RPG character, front view, blonde, clean lines, isolated on transparent background, 120x120 pixels, no face, only hair, game sprite, fantasy style
+
+Pixel art braid hairstyle for a fantasy RPG character, front view, dark brown hair, thick braids, clean lines, transparent background, 120x120 pixels, no face, only hair, game sprite
+
+Pixel art armor for a warrior class in an RPG game, front view, steel plate armor with shoulder pads, red cloak, no body, only clothing, transparent background, 120x120 pixels, clean lines, fantasy style, game sprite
+
+Pixel art robe and staff for a mage class in an RPG game, front view, blue glowing details, magical aura, no body, only clothing and staff, transparent background, 120x120 pixels, fantasy style, game sprite
+
+Pixel art leather armor for a rogue class in an RPG game, front view, dark green with belts and pouches, hooded, no body, only clothing, transparent background, 120x120 pixels, stealth style, game sprite
+
+Pixel art priest robe in a fantasy RPG, front view, white and gold, holy symbol on chest, no body, only clothing, transparent background, 120x120 pixels, clean lines, divine style, game sprite
+

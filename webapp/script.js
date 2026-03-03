@@ -138,7 +138,7 @@ async function createCharacter() {
 
         if (result.success) {
             alert(`Персонаж "${name}" создан!\nКласс: ${cls}\nРаса: ${race}`);
-            window.location.href = '/'; // Перейти в игру
+window.location.href = '/inventory.html' + window.location.search;
         } else {
             alert("Ошибка при создании");
         }

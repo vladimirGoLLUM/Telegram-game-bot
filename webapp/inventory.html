@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Инвентарь — The Witcher 3 Style</title>
+    <link rel="stylesheet" href="inventory.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Roboto:wght@300;400&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="witcher-container">
+        <!-- Верхняя панель -->
+        <header class="top-bar">
+            <div class="tabs">
+                <button class="tab active" data-tab="inventory">Inventory</button>
+                <button class="tab" data-tab="alchemy">Alchemy</button>
+                <button class="tab" data-tab="map">Map</button>
+                <button class="tab" data-tab="quests">Quests</button>
+                <button class="tab" data-tab="character">Character</button>
+                <button class="tab" data-tab="meditation">Meditation</button>
+                <button class="tab" data-tab="glossary">Glossary</button>
+            </div>
+
+            <div class="status-indicators">
+                <span>Level: <strong id="player-level">37</strong></span>
+                <span>Vitality: <strong id="health">1600/2000</strong></span>
+                <span>Gold: <strong id="gold">190</strong></span>
+            </div>
+        </header>
+
+        <!-- Основной макет -->
+        <main class="inventory-layout">
+            <!-- Левая часть: список предметов -->
+            <aside class="item-list">
+                <div class="section-header">
+                    <h3>Items</h3>
+                    <input type="text" id="search-box" placeholder="Search..." />
+                </div>
+
+                <div class="categories">
+                    <button class="cat-btn active" data-cat="weapons"><img src="icons/sword.png" alt="Weapons"/> Weapons</button>
+                    <button class="cat-btn" data-cat="armor"><img src="icons/armor.png" alt="Armor"/> Armor</button>
+                    <button class="cat-btn" data-cat="consumables"><img src="icons/potion.png" alt="Potions"/> Consumables</button>
+                    <button class="cat-btn" data-cat="crafting"><img src="icons/material.png" alt="Materials"/> Crafting</button>
+                    <button class="cat-btn" data-cat="quest"><img src="icons/quest.png" alt="Quest"/> Quest Items</button>
+                </div>
+
+                <div class="items-grid" id="items-grid">
+                    <!-- Предметы загружаются через JS -->
+                </div>
+            </aside>
+
+            <!-- Центр: модель персонажа -->
+            <section class="character-model">
+                <div class="model-container">
+                    <img src="https://i.imgur.com/XqCJbYf.png" alt="Character" class="model-img" />
+                    <!-- Экипированные слоты будут поверх модели -->
+                    <div class="equip-slots">
+                        <div class="slot chest" data-item="chest"></div>
+                        <div class="slot gloves" data-item="gloves"></div>
+                        <div class="slot trousers" data-item="trousers"></div>
+                        <div class="slot boots" data-item="boots"></div>
+                        <div class="slot weapon-main" data-item="weapon-main"></div>
+                        <div class="slot weapon-off" data-item="weapon-off"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Правая часть: слоты экипировки -->
+            <aside class="equip-slots-panel">
+                <h3>Equipped</h3>
+                <div class="slot-row">
+                    <label>Chest Armor</label>
+                    <div class="slot" data-type="chest" id="slot-chest">?</div>
+                </div>
+                <div class="slot-row">
+                    <label>Gloves</label>
+                    <div class="slot" data-type="gloves" id="slot-gloves">?</div>
+                </div>
+                <div class="slot-row">
+                    <label>Trousers</label>
+                    <div class="slot" data-type="trousers" id="slot-trousers">?</div>
+                </div>
+                <div class="slot-row">
+                    <label>Boots</label>
+                    <div class="slot" data-type="boots" id="slot-boots">?</div>
+                </div>
+                <div class="slot-row">
+                    <label>Main Weapon</label>
+                    <div class="slot" data-type="weapon-main" id="slot-weapon-main">⚔️</div>
+                </div>
+                <div class="slot-row">
+                    <label>Off-Hand</label>
+                    <div class="slot" data-type="weapon-off" id="slot-weapon-off">🛡️</div>
+                </div>
+                <div class="slot-row">
+                    <label>Pockets</label>
+                    <div class="pocket-slots">
+                        <div class="slot pocket" data-type="pocket1">+</div>
+                        <div class="slot pocket" data-type="pocket2">+</div>
+                        <div class="slot pocket" data-type="pocket3">+</div>
+                        <div class="slot pocket" data-type="pocket4">+</div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- Нижняя панель: действия и статусы -->
+        <footer class="action-bar">
+            <div class="stats">
+                <span>Weight: <strong id="weight">12/50 kg</strong></span>
+                <span>Armor: <strong id="armor">180</strong></span>
+                <span>DPS: <strong id="dps">240</strong></span>
+                <span>Sign Intensity: <strong id="sign-intensity">+15%</strong></span>
+            </div>
+            <div class="actions">
+                <button id="btn-back">Back</button>
+                <button id="btn-equip">Equip</button>
+                <button id="btn-drop">Drop Item</button>
+            </div>
+        </footer>
+
+        <!-- Подсказка -->
+        <div class="tooltip" id="tooltip" style="display: none;">
+            <h4 id="item-name">Меч ведьмака</h4>
+            <p id="item-desc">Редкое оружие, найденное в руинах Каэроса.</p>
+            <ul id="item-stats"></ul>
+            <div class="item-actions">
+                <button onclick="equipItem()">Equip</button>
+                <button onclick="dropItem()">Drop</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="inventory.js"></script>
+</body>
+<div style="
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #1a1a2e;
+    border: 1px solid #4e4e9e;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    z-index: 1000;
+">
+    <a href="/index.html?user_id=
+        <%= user_id %>
+    " style="color: #d4af37; text-decoration: none;">
+        ✏️ Пересоздать персонажа
+    </a>
+</div>
+</html>
